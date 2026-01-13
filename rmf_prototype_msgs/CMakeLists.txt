@@ -43,6 +43,8 @@ set(msg_files
   "msg/TrafficDependency.msg"
   "msg/Trajectory.msg"
   "msg/Waypoint.msg"
+  "msg/MAPFTrajectory.msg"
+  "msg/MAPFResult.msg"
 )
 
 rosidl_generate_interfaces(${PROJECT_NAME}
