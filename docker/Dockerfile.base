@@ -20,6 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Rust toolchain (Stable)
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
+RUN cargo install cargo-ament-build
 
 # Install Cargo / Colcon ROS 2 Rust integration tools via pip
 RUN pip3 install -U --break-system-packages colcon-cargo colcon-ros-cargo
@@ -40,7 +41,7 @@ COPY . /tmp/next_gen_prototype
 RUN apt-get update && \
     rosdep init || true && \
     rosdep update && \
-    rosdep install --from-paths src /tmp/next_gen_prototype --ignore-src -y --skip-keys="rclrs" && \
+    rosdep install --from-paths src /tmp/next_gen_prototype --ignore-src -y --skip-keys="rclrs ament_cargo ament_python" && \
     rm -rf /var/lib/apt/lists/* && \
     rm -rf /tmp/next_gen_prototype
 
