@@ -19,9 +19,14 @@ let mouseY = 0;
 // Canvas config
 const canvas = document.getElementById('grid-canvas');
 const ctx = canvas.getContext('2d');
-const scale = 25; // pixels per meter
-const centerX = canvas.width / 2;
-const centerY = canvas.height / 2;
+// View transform: `scale` px per meter, and (centerX, centerY) the pixel
+// location of world origin (0, 0). These start at a sensible default and are
+// recomputed by fitViewToConfig() so a loaded reservation config fills the view.
+const DEFAULT_SCALE = 25; // pixels per meter
+const SNAP_M = 1; // robot placement resolution, in meters (see toGrid)
+let scale = DEFAULT_SCALE;
+let centerX = canvas.width / 2;
+let centerY = canvas.height / 2;
 const REGION_HINT_POINT = 1;
 const REGION_HINT_AXIS_ALIGNED_RECTANGLE = 2;
 
@@ -66,6 +71,7 @@ function initSSE() {
       const msg = JSON.parse(event.data);
       if (msg.type === 'reservation_config') {
         reservationConfig = msg;
+        fitViewToConfig();
         console.log(`Received reservation config: ${msg.safe_sets.length} safe set(s), ${msg.parking_spots.length} parking spot(s).`);
       } else if (msg.type === 'odom') {
         const r = robots.find(robot => robot.name === msg.name);
@@ -127,8 +133,8 @@ function initSSE() {
 // Coordinate mapping helpers
 function toGrid(px, py) {
   return {
-    x: Math.round((px - centerX) / scale),
-    y: Math.round((centerY - py) / scale)
+    x: Math.round((px - centerX) / scale / SNAP_M) * SNAP_M,
+    y: Math.round((centerY - py) / scale / SNAP_M) * SNAP_M
   };
 }
 
@@ -137,6 +143,61 @@ function toPixel(gx, gy) {
     x: centerX + gx * scale,
     y: centerY - gy * scale
   };
+}
+
+// Pick a nice grid spacing (1/2/5 x 10^n meters) so the visible range is
+// divided into roughly `divisions` cells regardless of zoom level.
+function niceGridStep(metersVisible, divisions = 12) {
+  if (!(metersVisible > 0)) return 1;
+  const target = metersVisible / divisions;
+  const pow = Math.pow(10, Math.floor(Math.log10(target)));
+  return ([1, 2, 5, 10].find(m => m * pow >= target) || 10) * pow;
+}
+
+// Collect the world-space bounding box of every safe set and parking spot.
+function reservationConfigBounds() {
+  if (!reservationConfig) return null;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const regions = [
+    ...(reservationConfig.safe_sets || []),
+    ...(reservationConfig.parking_spots || [])
+  ];
+  for (const item of regions) {
+    const bounds = regionBounds(item.region);
+    if (!bounds) continue;
+    minX = Math.min(minX, bounds.minX);
+    minY = Math.min(minY, bounds.minY);
+    maxX = Math.max(maxX, bounds.maxX);
+    maxY = Math.max(maxY, bounds.maxY);
+  }
+  return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
+}
+
+// Rescale and recenter the view so the loaded reservation config fits the
+// canvas with a margin. Falls back to the default view when there is no config.
+function fitViewToConfig() {
+  const bounds = reservationConfigBounds();
+  if (!bounds) {
+    scale = DEFAULT_SCALE;
+    centerX = canvas.width / 2;
+    centerY = canvas.height / 2;
+    return;
+  }
+
+  const margin = 1.15; // ~15% padding around the config
+  const worldW = Math.max(bounds.maxX - bounds.minX, 1e-3);
+  const worldH = Math.max(bounds.maxY - bounds.minY, 1e-3);
+  const fitScale = Math.min(
+    canvas.width / (worldW * margin),
+    canvas.height / (worldH * margin)
+  );
+  // Cap zoom-in so a tiny config doesn't blow up to absurd magnification.
+  scale = Math.min(fitScale, 80);
+
+  const worldCenterX = (bounds.minX + bounds.maxX) / 2;
+  const worldCenterY = (bounds.minY + bounds.maxY) / 2;
+  centerX = canvas.width / 2 - worldCenterX * scale;
+  centerY = canvas.height / 2 + worldCenterY * scale;
 }
 
 // Helper to show instructions
@@ -620,21 +681,44 @@ function drawReservationConfig() {
 function drawGrid() {
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  // 1. Draw fine grid
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.03)';
-  ctx.lineWidth = 1;
-  for (let x = 0; x < canvas.width; x += scale) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, canvas.height);
-    ctx.stroke();
+  // 1. Draw grid, aligned to the world origin.
+  const worldLeft = (0 - centerX) / scale;
+  const worldRight = (canvas.width - centerX) / scale;
+  const worldBottom = (centerY - canvas.height) / scale;
+  const worldTop = (centerY - 0) / scale;
+  // Major lines fall on a "nice" interval for orientation/labels; never finer
+  // than the snap resolution so every labelled line is a placeable position.
+  const majorStep = Math.max(
+    niceGridStep(Math.max(worldRight - worldLeft, worldTop - worldBottom)),
+    SNAP_M
+  );
+
+  const drawLines = (step, style) => {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = 1;
+    for (let gx = Math.ceil(worldLeft / step) * step; gx <= worldRight; gx += step) {
+      const px = centerX + gx * scale;
+      ctx.beginPath();
+      ctx.moveTo(px, 0);
+      ctx.lineTo(px, canvas.height);
+      ctx.stroke();
+    }
+    for (let gy = Math.ceil(worldBottom / step) * step; gy <= worldTop; gy += step) {
+      const py = centerY - gy * scale;
+      ctx.beginPath();
+      ctx.moveTo(0, py);
+      ctx.lineTo(canvas.width, py);
+      ctx.stroke();
+    }
+  };
+
+  // Minor grid: one line at every robot-placement snap position, so the user
+  // can see every spot a robot can be placed at.
+  if (scale * SNAP_M >= 5) {
+    drawLines(SNAP_M, 'rgba(255, 255, 255, 0.04)');
   }
-  for (let y = 0; y < canvas.height; y += scale) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(canvas.width, y);
-    ctx.stroke();
-  }
+  // Major grid: brighter lines on the nice interval.
+  drawLines(majorStep, 'rgba(255, 255, 255, 0.10)');
 
   // 2. Draw axis lines
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.12)';
@@ -658,18 +742,18 @@ function drawGrid() {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
 
-  for (let x = -10; x <= 10; x += 2) {
-    if (x === 0) continue;
-    const pix = toPixel(x, 0);
-    ctx.fillText(x.toString(), pix.x, centerY + 6);
+  const labelY = Math.min(Math.max(centerY + 6, 2), canvas.height - 12);
+  for (let gx = Math.ceil(worldLeft / majorStep) * majorStep; gx <= worldRight; gx += majorStep) {
+    if (Math.abs(gx) < majorStep / 2) continue; // skip the origin
+    ctx.fillText(String(Math.round(gx * 1000) / 1000), centerX + gx * scale, labelY);
   }
 
   ctx.textAlign = 'right';
   ctx.textBaseline = 'middle';
-  for (let y = -10; y <= 10; y += 2) {
-    if (y === 0) continue;
-    const pix = toPixel(0, y);
-    ctx.fillText(y.toString(), centerX - 8, pix.y);
+  const labelX = Math.min(Math.max(centerX - 8, 24), canvas.width - 2);
+  for (let gy = Math.ceil(worldBottom / majorStep) * majorStep; gy <= worldTop; gy += majorStep) {
+    if (Math.abs(gy) < majorStep / 2) continue;
+    ctx.fillText(String(Math.round(gy * 1000) / 1000), labelX, centerY - gy * scale);
   }
 
   // Draw the reservation config behind plans and robots.
@@ -950,6 +1034,7 @@ function fetchReservationConfig() {
     .then(data => {
       if (data && data.safe_sets) {
         reservationConfig = data;
+        fitViewToConfig();
         console.log('Loaded reservation config:', reservationConfig);
       }
     })

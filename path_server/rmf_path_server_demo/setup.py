@@ -15,6 +15,10 @@ setup(
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'www'), glob('www/*')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
+        (os.path.join('share', package_name, 'maps'),
+            glob('maps/*.building.yaml')
+            + glob('maps/*.site.json')
+            + glob('maps/*.png')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,

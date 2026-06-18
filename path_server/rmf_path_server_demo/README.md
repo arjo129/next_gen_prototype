@@ -35,3 +35,26 @@ ros2 launch rmf_path_server_demo demo_destination_server.launch.py
 ## Reservation Config Visualization
 
 When the destination server loads a reservation configuration, it republishes the parsed config on the transient-local topic `/destination/reservation_config`. The dashboard subscribes to this topic and draws the config as a background layer on the canvas.
+
+## Loading Reservation Config from RMF Site Editor
+
+The destination server accepts three configuration formats through its existing `config_file` parameter:
+
+```text
+*.site.json      # Native RMF Site Editor project
+*.building.yaml  # Legacy Traffic Editor building map
+*.yaml           # Explicit reservation configuration
+```
+
+For example, the command below loads the config at `maps/office.site.json`:
+
+```bash
+ros2 launch rmf_path_server_demo demo_destination_server.launch.py \
+  config_file:=$(ros2 pkg prefix rmf_path_server_demo)/share/rmf_path_server_demo/maps/office.site.json
+```
+
+We include in this package example configs **adapted from** the Open-RMF office demo:
+* [`maps/office.building.yaml`](https://github.com/open-rmf/rmf_demos/blob/main/rmf_demos_maps/maps/office/office.building.yaml)
+* [`maps/office.site.json`](https://github.com/open-rmf/rmf_site_ros2/blob/main/rmf_site_demos/maps/office/office.site.json)
+
+The server then derives safe sets from floor polygons and parking spots from locations tagged as `ParkingSpot`, and republishes them for the dashboard to visualize.

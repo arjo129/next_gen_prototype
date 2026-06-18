@@ -2,16 +2,25 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import DeclareLaunchArgument
+from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 
 def generate_launch_description():
     # Reservation config the destination server loads and republishes for the
     # dashboard to visualize.
-    reservation_config = os.path.join(
+    default_config = os.path.join(
         get_package_share_directory('rmf_path_server_demo'),
         'config',
         'reservation_config.yaml',
+    )
+    config_file = LaunchConfiguration('config_file')
+    declare_config_file = DeclareLaunchArgument(
+        'config_file',
+        default_value=default_config,
+        description='Reservation config the destination server loads '
+                    '(*.yaml, *.site.json, or *.building.yaml).',
     )
 
     # 1. Start the RMF path server
@@ -38,7 +47,7 @@ def generate_launch_description():
         executable='rmf_simple_destination_server',
         name='rmf_simple_destination_server',
         output='both',
-        parameters=[{'config_file': reservation_config}]
+        parameters=[{'config_file': config_file}]
     )
 
     # 4. Start the plan executor
@@ -50,6 +59,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        declare_config_file,
         path_server,
         robot_spawner,
         destination_server,
